@@ -2,6 +2,7 @@ import openpyxl
 from docx import Document
 import re
 import math
+from openpyxl.styles import PatternFill
 
 # Открываем .docx
 doc = Document(r"C:\Users\User\Documents\диплом\Возможно поможет в написании диплома(1)\парам.docx")
@@ -11,19 +12,24 @@ wb = openpyxl.Workbook()
 ws_t0 = wb.active
 ws_t0.title = "T0"
 ws_20t0 = wb.create_sheet(title="20T0")
+ws_errors =wb.create_sheet(title="Праметры с ошибкой") 
 
 # Заголовки
 headers1 = ["Наименование", "Идентификатор", "Номер 16р слова", "Начальный участок выдачи", "Конечный участок выдачи", "Тип", "Задача/Блок", "Количество слов"]
 headers2 = ["Наименование", "Идентификатор", "Номер 16р слова","Номер счетчика", "Начальный участок выдачи", "Конечный участок выдачи", "Тип", "Задача/Блок", "Количество слов"]
 ws_t0.append(headers1)
 ws_20t0.append(headers2)
+ws_errors.append(headers1)
 
 # Массивы
 words = []
 used_words = []
 rows_T0 = []
 rows_20T0 = []
-
+#rows_with_r = []
+rows_errors = []
+available_time = [100,101,105,110,120,125,130,135,140,145,150,155,160,165,170,175,180,185,190,195,200,205,210,215,220,225,230,240,255]
+available_tip = [1,2,3,4,5,6,7]
 number_word = 51
 
 # --- Первый проход: читаем строки и определяем, куда записывать ---
@@ -47,14 +53,27 @@ for i, row in enumerate(doc.tables[0].rows):
         start_num = numbers[0]
         end_num = numbers[1]
 
+    words_to_add = 1.0
+    """""
+    has_r = 'р' in cells[-2]
 
-    numbers = re.findall(r'(\d+\.?\d*)', cells[-2].split('/')[0])  # числа до "/"
-    
+    if has_r:
+        match = re.search(r'(\d+)\s*р', cells[-2])
+        words_to_add = float(match.group(1)) / 16.0 if match else 1.0
+    else:
+        numbers = re.findall(r'(\d+\.?\d*)', cells[-2].split('/')[0])  # числа до "/"
+        for num in numbers:
+            words_to_add *= float(num)#нормальная проверка 
     # Перемножаем все числа до "/"
-    words_to_add = 1
-    for num in numbers:
-        words_to_add *= float(num)
-    
+    """
+    if 'р' in cells[-2]:
+        match = re.search(r'(\d+)\s*р', cells[-2])
+        words_to_add = float(match.group(1)) / 16.0
+    else:
+        numbers = re.findall(r'(\d+\.?\d*)', cells[-2].split('/')[0])  # числа до "/"
+        for num in numbers:
+            words_to_add *= float(num)
+    # Перемножаем все числа до "/"
     # Проверка на наличие "Ктгс" и умножение на KTGS
     if 'Ктгс' in cells[-2]:
         words_to_add *= KTGS
@@ -81,13 +100,21 @@ for i, row in enumerate(doc.tables[0].rows):
         "excel_row": excel_row
     }
 
-    if group == "20T0":
-        rows_20T0.append(row_data)
-        target_ws.append([name, id, "","", start_num, end_num, tip, block, words_to_add])
-    else:
-        rows_T0.append(row_data)
-        target_ws.append([name, id, "", start_num, end_num, tip, block, words_to_add])
+    #if has_r and group == "T0":
+    #    rows_with_r.append(row_data)
+    #else:
+    #    rows_T0.append(row_data)
 
+    if int(start_num) not in available_time or int(end_num) not in available_time or int(tip) not in available_tip or group not in ['T0', '20T0'] or (int(start_num) >= int(end_num)):
+        rows_errors.append(row_data)
+    else:
+        if group == "20T0":
+            rows_20T0.append(row_data)
+            target_ws.append([name, id, "","", start_num, end_num, tip, block, words_to_add])
+        else:
+            rows_T0.append(row_data)
+            target_ws.append([name, id, "", start_num, end_num, tip, block, words_to_add])
+    
 
 # --- Сортировка и выдача слов ---
 rows_20T0.sort(key=lambda row: row["words_to_add"], reverse=True)
@@ -156,7 +183,7 @@ for row in final_rows_20T0:
     ])
 number_word += count_words
 # --- Обработка строк для T0 ---
-# Здесь можно добавить другие специфические условия для листа "T0"
+
 for row in rows_T0:
     start_num = row["start_num"]
     end_num = row["end_num"]
@@ -182,29 +209,49 @@ for row in rows_T0:
 
     ws_t0.cell(row=excel_row, column=3).value = word_range
 
-for row in rows_T0:
+for row in rows_T0:#переделано 
     start_num = row["start_num"]
     end_num = row["end_num"]
     excel_row = row["excel_row"]
     group = row["group"]
-    words_to_add = row["words_to_add"]                                       #row["words_to_add"] * row["count"]
+    words_to_add = int(row["words_to_add"])
     target_ws = ws_t0 if group == "T0" else ws_20t0
     assigned_words = []
 
-    for _ in range(int(words_to_add)):
-        for word in used_words:
-            if int(word["конечный"]) < int(start_num):
+    # Пробуем найти подряд идущие свободные слова
+    for i in range(len(used_words) - words_to_add + 1):
+        candidate_group = used_words[i:i + words_to_add]
+        if all(int(word["конечный"]) < int(start_num) for word in candidate_group):
+            # Назначаем слова
+            for word in candidate_group:
                 word["конечный"] = end_num
                 for w in words:
                     if w["номер"] == word["номер"]:
                         w["конечный"] = end_num
                         break
                 assigned_words.append(word["номер"])
-                break
+            break  # Нашли и назначили — выходим из цикла
 
+    # Записываем в Excel диапазон, если слова были найдены
     if assigned_words:
         word_range = assigned_words[0] if len(assigned_words) == 1 else f"{assigned_words[0]}-{assigned_words[-1]}"
         target_ws.cell(row=excel_row, column=3).value = word_range
+        
+red_fill = PatternFill(start_color="FF9999", end_color="FF9999", fill_type="solid") 
+for row in rows_errors:
+    ws_errors.append([
+    row["name"],
+    row["id"],
+    "",
+    row["start_num"],
+    row["end_num"],
+    row["tip"],
+    row["block"],
+    row["words_to_add"]
+])
+    last_row = ws_errors.max_row
+    for col in range(1, 9):  # Подкрашиваем ячейки A-H
+        ws_errors.cell(row=last_row, column=col).fill = red_fill
 # --- Сохраняем ---
 wb.save(r"C:\Users\User\Documents\диплом\результат.xlsx")
 print("Файл сохранен!")

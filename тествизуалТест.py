@@ -420,29 +420,59 @@ def process_file(input_path, output_path):
         ])
         row["excel_row"] = ws_t0.max_row
 
-    for row in rows_T0:
-        start_num = row["start_num"]
-        end_num = row["end_num"]
-        words_to_add = row["words_to_add"]
+# Оптимизированный алгоритм распределения слов для T0
+    used_words = []  # Слова, которые можно расширить
+    number_word_T0 = number_word  # Начинаем нумерацию с текущего number_word
+
+# Сортируем строки T0 по start_num для лучшего распределения
+    rows_T0_sorted = sorted(rows_T0, key=lambda x: int(x["start_num"]))
+
+    for row in rows_T0_sorted:
+        start_num = int(row["start_num"])
+        end_num = int(row["end_num"])
+        words_needed = int(row["words_to_add"])
         excel_row = row["excel_row"]
-        first_word = number_word
-
-        for _ in range(int(words_to_add)):
-            words.append({
-                "номер": str(number_word),
+    
+        assigned_words = []
+    
+    # Пытаемся найти подходящие уже использованные слова
+        for word in used_words:
+            if int(word["конечный"]) < start_num and words_needed > 0:
+                # "Расширяем" слово на новый диапазон
+                word["конечный"] = end_num
+                assigned_words.append(word["номер"])
+                words_needed -= 1
+    
+    # Если нужно еще слова - создаем новые
+        while words_needed > 0:
+            new_word = {
+                "номер": str(number_word_T0),
                 "начальный": start_num,
                 "конечный": end_num
-            })
-            used_words.append({
-                "номер": str(number_word),
-                "начальный": start_num,
-                "конечный": end_num
-            })
-            number_word += 1
-
-        last_word = number_word - 1
-        word_range = f"{first_word}" if first_word == last_word else f"{first_word}-{last_word}"
+            }
+            used_words.append(new_word)
+            assigned_words.append(str(number_word_T0))
+            number_word_T0 += 1
+            words_needed -= 1
+    
+    # Формируем диапазон слов для Excel
+        if not assigned_words:
+            word_range = ""
+        elif len(assigned_words) == 1:
+            word_range = assigned_words[0]
+        else:
+        # Сортируем номера слов перед созданием диапазона
+            sorted_words = sorted(assigned_words, key=lambda x: int(x))
+            word_range = f"{sorted_words[0]}-{sorted_words[-1]}"
+    
         ws_t0.cell(row=excel_row, column=3).value = word_range
+
+# Обновляем глобальную переменную number_word
+    number_word = number_word_T0
+
+# Добавляем служебную информацию в T0
+    ws_t0.merge_cells('K3:S3')
+    ws_t0['K3'] = f"Диапазон слов, выделенный под параметры T0: {number_word - len(used_words)} - {number_word - 1}"
 ########################################################
     
     rows_T0_raz.sort(key=lambda row: row["start_num"])
